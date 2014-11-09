@@ -1,5 +1,9 @@
 """ """
 # TODO Note that the infrastructure Certs are not in the database
+# Note: May skip serial numbers
+
+
+
 from .errors import IssuingError, ConfigError, UnexpectedLogicError, CertificateParsingError
 from .dbaccess import DBConnector
 import logging
@@ -27,8 +31,28 @@ class CertificateAuthority:
 		    from the settings file.
 		    
 		"""
-		self.opensslConfig = settingsFile;
-		self._connector = DBConnector(settingsFile)
+		try: 
+			# Parse the configuration file
+			config = configparser.ConfigParser(allow_no_value = False,
+						interpolation = configparser.ExtendedInterpolation(),
+						inline_comment_prefixes = ('#',';'))
+			# Change the regex to allow spaces in the section name
+			config.SECTCRE = reEngine.compile(r"\[ *(?P<header>[^]]+?) *\]")
+			config.read(settingsFile)
+
+			ca_section = config.get('ca', 'default_ca')
+			self.serialFile = config.get(ca_section, 'serial')
+			self.privateKeyFile = config.get(ca_section, 'private_key')
+			self.certificateFile = config.get(ca_section, 'certificate')
+			self.daysToCert = config.get(ca_section, 'default_days', fallback = '365')
+			self.digest = config.get(ca_section, 'default_md', fallback = 'sha512')
+			self.extensionSect = config.get(ca_section, 'x509_extensions')
+		except configparser.Error as err:
+			raise ConfigError('Problem reading the CA settings from '
+				'the configuration file.') from err
+		else:
+			self.opensslConfig = settingsFile;
+			self.db = DBConnector(settingsFile)
 
 	
 	def issueCert(self, uid, pHash):
@@ -41,64 +65,41 @@ class CertificateAuthority:
 		"""
 		try:
 			# Connect to the database
-			self._connector.connect()
+			self.db.connect()
 			
 			# Do the call authentication check
-			if not self._connector.ensureAuthCall(uid, pHash):
+			if not self.db.ensureAuthCall(uid, pHash):
 				raise IssuingError('The user id, token combination is not valid')
 			
 			# Update the databases to account for expired certificates
-			self._updatedb()
+			self.db.updateExpiredCerts()
 			
 			# Ensure that the employee does not have a certificate issued
-			if self._connector.hasIssued(uid):
+			if self.db.hasIssued(uid):
 				raise IssuingError('The user already has an issued certificate. '
 					'Please first revoke that certificate.')
 			
 			# Get the client's information
-			lname, fname, email = self._connector.getEmployeeAtr(uid)
+			lname, fname, email = self.db.getEmployeeAtr(uid)
 			
 			# Create the private key, request and certificate
 			privateKey, csr = self._req(uid, lname, fname, email)
 			cert = self._sign(csr)
 			
+			# TODO encrypt the private key for storage
+			encPrivateKey = privateKey
+			
+			# Store the certificate and key in the database
+			self.db.storeCert(uid, cert, encPrivateKey)
 			
 			
 		except (MySQLError, IssuingError) as err:
 			logging.exception(err.msg)
 			raise
 		finally:
-			self._connector.close()
+			self.db.close()
 		return cert
-	
-	# TODO REDO
-	def _updatedb(self):
-		""" Updates the openssl text database as well as the mysql database
-		to purge them of expired certificates. 
-		
-		Raises:
-		  IssuingError: If the update fails on the openssl database
-		
-		"""
-		# Update the text database.
-		process = subprocess.Popen(['openssl', 'ca', '-updatedb'
-							  '-config', self.opensslConfig], 
-							stdin = subprocess.DEVNULL, stdout = subprocess.DEVNULL, 
-							stderr = subprocess.PIPE);
-		stdout, stderr = process.communicate()
-		# Expect a return code of zero for successful execution
-		if process.returncode != 0:
-			raise IssuingError('Unable to update the openssl database. '
-				'Openssl reason: %s' % stderr)
-		else:
-			logging.info('Successfully updated the openssl text database.')
-		
-		# Update the mysql database
-		self._connector.updateDatabase()
-		
-		
-		
-	
+
 	def _req(self, cn, sn, gn, email):
 		""" Generates a private key and certificate signing request (CSR) 
 		for the supplied credentials. 
@@ -125,7 +126,7 @@ class CertificateAuthority:
 		
 		# Use the openssl ca to sign the file 
 		process = subprocess.Popen(['openssl', 'req', '-new', '-batch', 
-							  '-outform', 'PEM',
+							  '-inform', 'PEM', '-outform', 'PEM',
 							  '-newkey', 'rsa', 
 							  '-subj', subject, 
 							  '-config', self.opensslConfig], 
@@ -147,9 +148,14 @@ class CertificateAuthority:
 			logging.info('Created a CSR for employee with uid %s', cn)
 			return match.groups()
 
-	# TODO REDO to use x509
+
+	
 	def _sign(self, csr):
 		""" Sign a certificate signing request.
+		
+		The options used include:
+		  - Input and output format are PEM
+		  - Extensions are dropped from the request
 		
 		Args:
 		  csr (string): A certificate signing request in PEM format.
@@ -165,25 +171,24 @@ class CertificateAuthority:
 		    fails.
 		
 		"""
-		# Create a temporary file containing the csr
-		with NamedTemporaryFile(mode='w+t', suffix='.pem') as tempFile:
-			tempFile.write(csr)
-			tempFile.flush()
-		
-			# Use the openssl ca to sign the file 
-			process = subprocess.Popen(['openssl', 'ca', 
-							   '-in', tempFile.name, 
-							   '-config', self.opensslConfig,
-							   '-notext', '-batch'], 
+		# Sign the certificate from the CSR
+		process = subprocess.Popen(['openssl', 'x509', '-req',
+							  '-inform', 'PEM', '-outform', 'PEM',
+							  '-CA', self.certificateFile, '-CAkey', self.privateKeyFile,
+							  '-CAserial', self.serialFile,
+							  '-extfile', self.opensslConfig, 
+							  '-extensions', self.extensionSect,
+							  '-days', self.daysToCert,
+							  '-%s' % self.digest, '-clrext'],
 							stdin = subprocess.PIPE, stdout = subprocess.PIPE, 
 							stderr = subprocess.PIPE, universal_newlines = True);
-			stdout, stderr = process.communicate(csr)
-			
+		stdout, stderr = process.communicate(csr)
 		# Expect a return code of zero for successful execution
 		if process.returncode != 0:
 			raise IssuingError('Unable to sign the certificate. '
 				'Openssl reason: %s' % stderr)
 		else:
+			# Create a certificate object
 			certif = Certificate(stdout)
 			logging.info('Signed a new certificate with serial number %s', 
 				certif.serial)

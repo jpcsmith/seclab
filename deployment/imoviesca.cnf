@@ -6,12 +6,13 @@
 default_ca = imovies_ca
 
 [ imovies_ca ]
-certificate		= ../CA/ca_cert.pem
-private_key		= ../CA/private/ca_key.pem
-database		= ../CA/index.txt
-serial			= ../CA/serial
+base_dir		= /home/jsmith/Dropbox/Course Files/Semester III/Security Lab/working/CA
+certificate		= ${base_dir}/ca_cert.pem
+private_key		= ${base_dir}/private/ca_key.pem
+database		= ${base_dir}/index.txt
+serial			= ${base_dir}/serial
 
-new_certs_dir	= ../CA/newcerts
+new_certs_dir	= ${base_dir}/CA/newcerts
 
 default_days	= 365
 default_md		= sha256
@@ -103,13 +104,22 @@ commonName		= supplied
 
 # ----- Settings for the connection to the database
 [ mysql ]
-default_db = mysql_local
+default_db = mysql_local_test
 
 [ mysql_local ]
 host			= 127.0.0.1
 port 			= 3306
 user			= ca
 database		= imovies
+ca_certificate	= ../CA/ca_cert.pem
+certificate		= ../CA/ca_nr_cert.pem
+private_key		= ../CA/private/ca_nr_key.pem
+
+[ mysql_local_test ]
+host			= 127.0.0.1
+port 			= 3306
+user			= ca
+database		= imovies_test
 ca_certificate	= ../CA/ca_cert.pem
 certificate		= ../CA/ca_nr_cert.pem
 private_key		= ../CA/private/ca_nr_key.pem

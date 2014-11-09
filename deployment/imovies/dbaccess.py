@@ -12,6 +12,7 @@ TODO ADD CIPHERS!!!
 from .errors import ConfigError, UnexpectedLogicError
 import configparser, mysql.connector, logging
 import re as regex
+from .ca import Certificate
 
 class DBConnector:
 	""" Facilitates connections to and interactions with the database.
@@ -38,7 +39,8 @@ class DBConnector:
 		try: 
 			# Parse the configuration file
 			config = configparser.ConfigParser(allow_no_value = False,
-						interpolation = configparser.ExtendedInterpolation())
+						interpolation = configparser.ExtendedInterpolation(),
+						inline_comment_prefixes = ('#',';'))
 			# Change the regex to allow spaces in the section name
 			config.SECTCRE = regex.compile(r"\[ *(?P<header>[^]]+?) *\]")
 			config.read(settingsFile)
@@ -147,13 +149,13 @@ class DBConnector:
 			cursor.execute(statement, data)
 			resultTuple = cursor.fetchone()
 			
-			exists = 1 in resultTuple
+			auth = 1 in resultTuple
 		finally:
 			cursor.close()
-		return exists
+		return auth
 	
 	
-	def updateDatabase(self):
+	def updateExpiredCerts(self):
 		""" Remove issued certificates from the mysql database whose expiry
 		dates have passed. 
 		
@@ -161,7 +163,8 @@ class DBConnector:
 		  mysql.connector.errors.Error: If the database query fails.
 		
 		"""
-		statement = 'DELETE FROM user_certs WHERE exp_date < UTC_TIMESTAMP()'
+		statement = ('UPDATE user_certs SET expired = TRUE '
+			'WHERE exp_date < UTC_TIMESTAMP()')
 		try:
 			cursor = self._connection.cursor()
 			cursor.execute(statement)
@@ -185,7 +188,8 @@ class DBConnector:
 		  mysql.connector.errors.Error: If the database query fails.
 		
 		"""
-		statement = 'SELECT EXISTS(SELECT 1 FROM user_certs WHERE uid=%s)'
+		statement = ('SELECT EXISTS(SELECT 1 FROM user_certs WHERE uid = %s '
+			'AND revoked = FALSE AND expired = FALSE)')
 		try:
 			cursor = self._connection.cursor(prepared = True)
 			cursor.execute(statement, (uid,))
@@ -195,3 +199,19 @@ class DBConnector:
 		finally:
 			cursor.close()
 		return exists
+	
+	
+	def storeCert(uid, certificate, encKey):
+		
+		statement = ('INSERT INTO user_certs(uid, serial, exp_date, '
+			'subject, certificate, private_key) VALUE (%s, %s, %s, %s, %s, %s, %s)')
+		data = (uid, certificate.serial, certificate.expiryDate, certificate.subject,
+		  certificate.encoding, encKey)
+		try:
+			cursor = self._connection.cursor(prepared = True)
+			cursor.execute(statement, data)
+		finally:
+			cursor.close()
+		
+		
+		

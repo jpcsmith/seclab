@@ -11,11 +11,11 @@ class TestCertificateAuthority(unittest.TestCase):
 	
 	@classmethod
 	def setUpClass(cls):
-		cls.ca = CertificateAuthority('imoviesca.cnf')
+		cls.ca = CertificateAuthority('imoviescaV2.cnf')
 		
 	@classmethod
 	def tearDownClass(cls):
-		cls.ca._connector.close()
+		cls.ca.db.close()
 	
 	@unittest.skip('Cant test more than the tested dbaccess method.')
 	def test__updatedb(self):
@@ -69,7 +69,7 @@ class TestCertificateAuthority(unittest.TestCase):
 		# Test using a valid CSR
 		cert = self.ca._sign(csr)
 		self.assertEqual(cert.subject, '/O=iMovies/OU=Employee Base/SN=Smith'
-				   '/GN=Jean-Pierre/emailAddress=jsmith@student.ethz.ch/CN=jsmith')
+				   '/GN=Jean-Pierre/CN=jsmith/emailAddress=jsmith@student.ethz.ch')
 		
 		# Test using an invalid CSR
 		badcsr = '-----BEGIN CERTIFICATE REQUEST-----\nNot a valid csr\n-----END CERTIFICATE REQUEST-----'

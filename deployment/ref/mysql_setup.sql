@@ -24,14 +24,19 @@ SOURCE ref/imovies_users.dump;
 -- Create the table holding user-cert assignments
 DROP TABLE IF EXISTS user_certs;
 CREATE TABLE user_certs (
-	uid varchar(64) NOT NULL, 
-	serial varchar(40) NOT NULL UNIQUE, -- Maximum permitted serial number is 20 octects
+	uid varchar(64) NOT NULL,
+	serial varchar(40) NOT NULL, -- Maximum permitted serial number is 20 octects
+	expired BOOLEAN NOT NULL DEFAULT FALSE,
 	exp_date datetime NOT NULL,
-	PRIMARY KEY(uid),
-	FOREIGN KEY(uid) REFERENCES users(uid) 
-		ON DELETE RESTRICT -- Prevent deletion of a user if they have a cert issued
+	revoked BOOLEAN NOT NULL DEFAULT FALSE,
+	subject TEXT NOT NULL,
+	certificate LONGTEXT NOT NULL,
+	private_key LONGTEXT NOT NULL,
+	PRIMARY KEY(serial),
+	FOREIGN KEY(uid) REFERENCES users(uid)
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
 
 -- Grant access priveleges
 GRANT SELECT ON imovies.users TO 'ca'@'%';
-GRANT SELECT, DELETE ON imovies.user_certs TO 'ca'@'%';
+GRANT SELECT, INSERT ON imovies.user_certs TO 'ca'@'%';
+GRANT UPDATE (expired, revoked) ON imovies.user_certs TO 'ca'@'%';
