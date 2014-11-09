@@ -4,15 +4,17 @@ This module primarily provides the DBConnector class which is used to
 connect to and transact with the database. 
 
 Security:
-  Prepared statements: Queries use prepared statements when providing input.
+  Prepared statements: Queries DO NOT use prepared statements when providing input.
+  This is because apparently when using PARAMERTIZED queries, variables are escaped.
 
 TODO ADD CIPHERS!!!
 """
 
-from .errors import ConfigError, UnexpectedLogicError
+from .errors import ConfigError
 import configparser, mysql.connector, logging
 import re as regex
-from .ca import Certificate
+from .certificate import Certificate
+import io
 
 class DBConnector:
 	""" Facilitates connections to and interactions with the database.
@@ -109,11 +111,10 @@ class DBConnector:
 		# Wrap in try finally to ensure the cursor is closed
 		try:
 			# Execute the statement and fetch the results
-			cursor = self._connection.cursor(prepared = True)
+			cursor = self._connection.cursor(buffered = True)
 			cursor.execute(statement, (uid,))
-			uid, lname, fname, email = cursor.fetchone()
 			
-			resultTuple = (bytes(uid), bytes(lname), bytes(fname), bytes(email))
+			resultTuple = cursor.fetchone()
 		finally:
 			cursor.close()
 		return resultTuple
@@ -145,7 +146,7 @@ class DBConnector:
 		data = (uid, token)
 		
 		try:
-			cursor = self._connection.cursor(prepared = True)
+			cursor = self._connection.cursor(buffered = True)
 			cursor.execute(statement, data)
 			resultTuple = cursor.fetchone()
 			
@@ -169,7 +170,7 @@ class DBConnector:
 			cursor = self._connection.cursor()
 			cursor.execute(statement)
 			logging.info('Successfully updated the issued certificates in the '
-				' mysql database.')
+				'mysql database.')
 		finally:
 			cursor.close()
 	
@@ -191,7 +192,7 @@ class DBConnector:
 		statement = ('SELECT EXISTS(SELECT 1 FROM user_certs WHERE uid = %s '
 			'AND revoked = FALSE AND expired = FALSE)')
 		try:
-			cursor = self._connection.cursor(prepared = True)
+			cursor = self._connection.cursor(buffered = True)
 			cursor.execute(statement, (uid,))
 			resultTuple = cursor.fetchone()
 			
@@ -201,15 +202,29 @@ class DBConnector:
 		return exists
 	
 	
-	def storeCert(uid, certificate, encKey):
+	def storeCert(self, uid, certificate, encKey):
+		""" Store the provided certificate and encoded key pair for the
+		specified user in the database. 
 		
+		Args:
+		  uid (string): The employee's user id
+		  certificate (imovies.certificate.Certificate): The certificate to store
+		  encKey (string): The encrypted private key corresponding to the
+		    provided certificate.
+		
+		Raises:
+		  mysql.connector.errors.Error: If the database query fails.
+		
+		"""
 		statement = ('INSERT INTO user_certs(uid, serial, exp_date, '
-			'subject, certificate, private_key) VALUE (%s, %s, %s, %s, %s, %s, %s)')
+			'subject, certificate, private_key) VALUE (%s, %s, %s, %s, %s, %s)')
 		data = (uid, certificate.serial, certificate.expiryDate, certificate.subject,
 		  certificate.encoding, encKey)
 		try:
-			cursor = self._connection.cursor(prepared = True)
+			cursor = self._connection.cursor()
 			cursor.execute(statement, data)
+			logging.info('Successfully stored the issued certificate in the '
+				'mysql database.')
 		finally:
 			cursor.close()
 		

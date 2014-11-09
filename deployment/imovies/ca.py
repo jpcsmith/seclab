@@ -1,10 +1,10 @@
 """ """
 # TODO Note that the infrastructure Certs are not in the database
 # Note: May skip serial numbers
+# TODO ADD random
 
 
-
-from .errors import IssuingError, ConfigError, UnexpectedLogicError, CertificateParsingError
+from .errors import IssuingError, ConfigError, CertificateParsingError
 from .dbaccess import DBConnector
 import logging
 from . import errors
@@ -14,6 +14,8 @@ import configparser
 import re as reEngine
 from tempfile import NamedTemporaryFile
 from datetime import datetime
+from .certificate import Certificate
+import os
 
 class CertificateAuthority:
 	""" """
@@ -58,9 +60,16 @@ class CertificateAuthority:
 	def issueCert(self, uid, pHash):
 		""" Issues a new certificate to the user specified by uid.
 		
-		TODO Overview of the method
-		  
-		  
+		Args:
+		
+		Returns:
+		
+		
+		Raises:
+		  IssuingError: If the certificate cannot be issued due to a fault
+		    in the CA's system or program.
+		  mysql.connector.errors.Error: If the certificate cannot be issued
+		    due to a problem with the database.
 		  
 		"""
 		try:
@@ -80,25 +89,33 @@ class CertificateAuthority:
 					'Please first revoke that certificate.')
 			
 			# Get the client's information
-			lname, fname, email = self.db.getEmployeeAtr(uid)
+			_, lname, fname, email = self.db.getEmployeeAtr(uid)
 			
 			# Create the private key, request and certificate
 			privateKey, csr = self._req(uid, lname, fname, email)
-			cert = self._sign(csr)
+			try:
+				cert = self._sign(csr)
+			except CertificateParsingError as err:
+				raise IssuingError('Unable to issue the certificate due to an '
+					'internal parsing error, this should never happen.') from err
+			
+			# Create the PKCS#12 bundle of the key and cert
+			packName = '%s, %s | iMovies' % (lname, fname)
+			pfx = self._toPKCS12(packName, cert, privateKey)
 			
 			# TODO encrypt the private key for storage
 			encPrivateKey = privateKey
 			
-			# Store the certificate and key in the database
+			""" Store the certificate and key in the database.
+			We do this last so that at this point we are certain we have
+			the product to return to the caller. If this fails, we dont
+			have to return anything.
+			"""
 			self.db.storeCert(uid, cert, encPrivateKey)
-			
-			
-		except (MySQLError, IssuingError) as err:
-			logging.exception(err.msg)
-			raise
 		finally:
 			self.db.close()
-		return cert
+		return pfx
+
 
 	def _req(self, cn, sn, gn, email):
 		""" Generates a private key and certificate signing request (CSR) 
@@ -148,7 +165,6 @@ class CertificateAuthority:
 			logging.info('Created a CSR for employee with uid %s', cn)
 			return match.groups()
 
-
 	
 	def _sign(self, csr):
 		""" Sign a certificate signing request.
@@ -195,50 +211,30 @@ class CertificateAuthority:
 			return certif
 		
 		
-class Certificate:
-	""" Class representing an issued certificate.
-	
-	Attributes:
-	  encoding (string): The PEM fromatted encoding of the certificate passed 
-	    in the constructor.
-	  serial (string): The certificate serial number, in hexadecimal, without 
-	    the leading '0x'
-	  subject (string): The one-line openssl encoding of the subject,e.g.:
-	    /O=iMovies/OU=TLS Infrastructure/CN=Backup Server
-	  expiryDate (datetime.datetime): The date at which the certificate is to 
-	    expiry. The stored date & time is UTC.
-	    
-	"""
-	def __init__(self, cert):
-		""" Initialise the certificate by parsing needed attributes
-		from the PEM encoding. 
+	def _toPKCS12(self, name, certificate, privateKey):
+		""" Converts a PEM certificate and PEM private key to a PKCS#12 bundle.
+		
+		Args:
+		  name (string): A friendly name to apply to the PKCS#12 bundle.
+		  certificate (imovies.certificate.Certificate): A certificate issued
+		    by the CA.
+		  privateKey (string): A PEM encoded private key corresponding to the
+		    supplied certificate.
 		
 		Raises:
-		  CertificateParsingError: If unable to parse the certificate
-		    from the proviced string.
+		  IssuingError: If the packaging failed. The message of the error 
+		    contains the openssl error output
+		
 		"""
-		self.encoding = cert
-		# Fetch the serial number and expiry date from the cert
-		process = subprocess.Popen(['openssl', 'x509', '-noout', 
-							  '-enddate', '-serial', '-subject'], 
-							 stdin = subprocess.PIPE, stdout = subprocess.PIPE, 
-							 stderr = subprocess.DEVNULL, universal_newlines = True);
-		stdout, stderr = process.communicate(cert)
+		process = subprocess.Popen(['openssl', 'pkcs12', '-export', '-name', name, 
+							  '-passout', 'pass:'],
+							stdin = subprocess.PIPE, stdout = subprocess.PIPE, 
+							stderr = subprocess.PIPE)#, universal_newlines = True)
+		# We change it to a byte stream because the newline was causing problems
+		# as a string.
+		data = (privateKey + '\n' + certificate.encoding).encode()
+		stdout, stderr = process.communicate(data)
 		if process.returncode != 0:
-			raise CertificateParsingError('Unable to parse the certificate. '
-				'Openssl reason: %s' % stderr)
-		
-		# Get and assign the subject string
-		pattern = '^subject=(?P<subject>.+)$'
-		match = reEngine.search(pattern, stdout, flags = reEngine.IGNORECASE | reEngine.MULTILINE)
-		self.subject = match.group(1).strip()
-		
-		# Get and assign the serial number
-		pattern = '^serial=(?P<serial>.+)$'
-		match = reEngine.search(pattern, stdout, flags = reEngine.IGNORECASE | reEngine.MULTILINE)
-		self.serial = match.group(1) # Hex string
-		
-		# Get and assign the expiry datetime
-		pattern = '^notAfter=(?P<datetime>.+)$'
-		match = reEngine.search(pattern, stdout, flags = reEngine.IGNORECASE | reEngine.MULTILINE)
-		self.expiryDate = datetime.strptime(match.group(1), '%b %d %H:%M:%S %Y %Z')
+			raise IssuingError('Unable to bundle as PKCS#12')
+		else:
+			return stdout

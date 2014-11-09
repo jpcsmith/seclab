@@ -4,6 +4,10 @@ from imovies.ca import Certificate
 import logging
 import subprocess
 import imovies.errors
+import mysql.connector
+from tempfile import NamedTemporaryFile
+import base64
+
 
 class TestCertificateAuthority(unittest.TestCase):
 	""" Unit tests for the CertificateAuthority class of module
@@ -11,17 +15,47 @@ class TestCertificateAuthority(unittest.TestCase):
 	
 	@classmethod
 	def setUpClass(cls):
-		cls.ca = CertificateAuthority('imoviescaV2.cnf')
+		""" Create a connection to the database for modifying
+		it during the tests. 
+		
+		"""
+		cls.cnx = mysql.connector.connect(user = 'root', password = 'imoviestest',
+										   autocommit = True)
+		cls.cursor = cls.cnx.cursor(buffered = True)
+		cls.cursor.execute("GRANT ALL ON imovies_test.* TO 'ca'@'%'")
+		# Initialise the CA
+		cls.ca = CertificateAuthority('imoviesca.cnf')
 		
 	@classmethod
 	def tearDownClass(cls):
+		""" Tears down the connections """
+		cls.cursor.close()
+		cls.cnx.close()
 		cls.ca.db.close()
-	
-	@unittest.skip('Cant test more than the tested dbaccess method.')
-	def test__updatedb(self):
-		""" Tests the internal function _updatedb of the CertificateAuthority
-		class """
+
+	def setUp(self):
+		""" Setup before each method invocation
+		
+		We reset the imovies_test database to a clone of the actual 
+		starting database
+		
+		"""
+		self.cursor.execute('DROP DATABASE IF EXISTS imovies_test')
+		self.cursor.execute('CREATE DATABASE imovies_test')
+		self.cursor.execute('USE imovies_test')
+		self.cursor.execute('CREATE TABLE users LIKE imovies.users')
+		self.cursor.execute('CREATE TABLE user_certs LIKE imovies.user_certs')
+		self.cursor.execute('INSERT INTO users SELECT * FROM imovies.users')
+		self.cursor.execute('INSERT INTO user_certs SELECT * FROM imovies.user_certs')
+		
+	def tearDown(self):
 		pass
+
+
+	def test_issueCert(self):
+		""" Sanity check that the parts of the issueCert function hold together. """
+		self.assertIsNotNone(self.ca.issueCert('fu', 
+									 '6e58f76f5be5ef06a56d4eeb2c4dc58be3dbe8c7'))
 	
 	def test__req(self):
 		""" Test the internal function _req of the CertificateAuthority class. """
@@ -113,6 +147,67 @@ class TestCertificateAuthority(unittest.TestCase):
 		self.assertRaises(imovies.errors.CertificateParsingError,
 			lambda: Certificate('-----BEGIN CERTIFICATE-----\n'
 			'Not valid\n-----END CERTIFICATE-----'))
+
+
+	def test__toPKCS12(self):
+		key = ('-----BEGIN PRIVATE KEY-----\n'
+			'MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAPbQGHsT6aONxp6M\n'
+			'jjEAZXoMuS22ZiJkVwPsuf2nK/aPy9bOHKU1TSNz/iBMJE/9OvAT5Lm0ZhPIRcSl\n'
+			'ctZ+a9Y8d3HUgHs7rM1FWk+YWMsnTRUWr/Sq2PM+E4lWZH4tp0kStVzwNocjhQX7\n'
+			'eh37bUTvw+9RsbfQrrZ/izO3ocefAgMBAAECgYEAqjdOCuPqyB9pEcOB9Q1+7rOD\n'
+			'qqEWwzVMRaqnguYeDceSHyy62L1v27mNU5zvljLgyN4Panudwprmcv5fusopd5Y1\n'
+			'F+tLyp55gP4U8l3bSq6YyLo5384Me5DCVOt3+BfTmxsZhpz752JedU5+MMJAbQAy\n'
+			'Yr7AHrB849+KQIeq8VECQQD9tbjOsYSl+NxDFKHUhfd8Qmv8c2ndeeCclU0Kp+1/\n'
+			'sO2mhI2ILG1T1DFuVtxNwz/IM19H5o0jJV7F4XLBlh6rAkEA+QpvoHWEsTTYU+EE\n'
+			'JbAAb8+W1gzc3Lr9ZS8LM6MUbLFGKtvf/NQ2NXkfD6Ns0AmnoKnukD1vTI94E0zj\n'
+			'DwPq3QJBALdQq0SlXVvy8WuCp9+AIK7m61GQLsj5PALHmc/+QAuIUl6D3iOrPh9Y\n'
+			'7ZJ1Ll79mcNU4x53hjkD0nOWDy2zA1sCQHCPU/atRwUlAmWe/VXfX8Mpi15BwA2Q\n'
+			'AnmaMrDrE48w7KrwaCOI8ttmXDCgR80boAUQ6T+OVODAs5/dj3644Y0CQCtpjYh9\n'
+			'CpiEqs9gmTUZ0gnm3VthSPqKosB+eZRtUFjeGdWvgK57xxdKB6fk8RbilPayDpPD\n'
+			'2wrJNhDYZKbcMX8=\n'
+			'-----END PRIVATE KEY-----')
+		certEnc = ('-----BEGIN CERTIFICATE-----\n'
+			'MIIEzTCCArWgAwIBAgIBaDANBgkqhkiG9w0BAQsFADBPMRAwDgYDVQQKDAdpTW92\n'
+			'aWVzMRswGQYDVQQLDBJQS0kgSW5mcmFzdHJ1Y3R1cmUxHjAcBgNVBAMMFUNlcnRp\n'
+			'ZmljYXRlIEF1dGhvcml0eTAeFw0xNDExMDkxMzU4NDlaFw0xNTExMDkxMzU4NDla\n'
+			'MIGIMRAwDgYDVQQKDAdpTW92aWVzMRYwFAYDVQQLDA1FbXBsb3llZSBCYXNlMQ4w\n'
+			'DAYDVQQEDAVTbWl0aDEUMBIGA1UEKgwLSmVhbi1QaWVycmUxDzANBgNVBAMMBmpz\n'
+			'bWl0aDElMCMGCSqGSIb3DQEJARYWanNtaXRoQHN0dWRlbnQuZXRoei5jaDCBnzAN\n'
+			'BgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA9tAYexPpo43GnoyOMQBlegy5LbZmImRX\n'
+			'A+y5/acr9o/L1s4cpTVNI3P+IEwkT/068BPkubRmE8hFxKVy1n5r1jx3cdSAezus\n'
+			'zUVaT5hYyydNFRav9KrY8z4TiVZkfi2nSRK1XPA2hyOFBft6HfttRO/D71Gxt9Cu\n'
+			'tn+LM7ehx58CAwEAAaOB/TCB+jAdBgNVHQ4EFgQU3HTF2iGQ/iT9o/4DCdr3WjP9\n'
+			'KcUwfwYDVR0jBHgwdoAUbBHJiwepZDeZCw7f8pI8glaic3KhU6RRME8xEDAOBgNV\n'
+			'BAoMB2lNb3ZpZXMxGzAZBgNVBAsMElBLSSBJbmZyYXN0cnVjdHVyZTEeMBwGA1UE\n'
+			'AwwVQ2VydGlmaWNhdGUgQXV0aG9yaXR5ggkAwelbEUtYjiIwCQYDVR0TBAIwADAL\n'
+			'BgNVHQ8EBAMCA8gwHQYDVR0lBBYwFAYIKwYBBQUHAwIGCCsGAQUFBwMEMCEGA1Ud\n'
+			'EQQaMBiBFmpzbWl0aEBzdHVkZW50LmV0aHouY2gwDQYJKoZIhvcNAQELBQADggIB\n'
+			'AD/JNoUFn/vjKy9x6UpjPnkBlXslGF5UJQBNjIJ+blApJs1cRpoX0sV7YcSf9iNz\n'
+			'n3oX/BdHZ78Hi+zgtgFZanYbbwpZhjT6+2fL2RyCamYeQmY7N5NHpv7Pf0ax695X\n'
+			'D3hhD0jtyAH6cIw54IRXAGBH+CeiYk38W+U/xJGGFh9wR+YYbYkPrbueJhrB1Fii\n'
+			'SSpvvMl8MwxdtP1X995GZlJVSoJ+xlnbMJgkDJKA2O7bAV4HMN5AHn+SBO9/Ow3n\n'
+			'9i7WALJbFrlbaGAyMrnKIfS6kXIbPWl/2qz1PBmUAWhGN+56Pg+evIZT9+y+xzow\n'
+			'7LMJs3VPjoEH8rapKsq7F03EuZbY+4meDnWQrCitNXUOfXaapxhncjtJDTxJWSth\n'
+			'NidSRJir3k8Lx7QY9zm6MVG0td3k2f5w9asgTMb7g57PqL49GqBPl4pv3LAuj8QD\n'
+			'b+s+TjfGejgkrmh6qIhoBnkKPUYatxax4I0bYHNaM1zUEeocXk+8uB8FsBE5SRgp\n'
+			'dsa/PJqsPxgcgzBOMf+RS1YzwXfctaPZgnezORRUUG8n6GtdRtUyQLx8ZxRfcAIj\n'
+			'lI1WuvRAxww+Lj0Ms64gZisHKPBa0piDNT5O3zsYI2rAliNKE+fTM6RjahpzhvQ7\n'
+			'UFPGKnrvpVZSZgqFjBnPI28uce8YoJBvMHyuBDeHu9As\n'
+			'-----END CERTIFICATE-----')
+		pfx = self.ca._toPKCS12('example', Certificate(certEnc), key)
+		
+		
+		# Check that the pfx byte array creates a pareable object
+		with open('temp.pfx', 'w+b') as temp:
+			temp.write(pfx)
+			temp.flush()
+			process = subprocess.Popen(['openssl', 'pkcs12', '-in', temp.name,
+							   '-passin', 'pass:', '-nodes'], 
+							stdin = subprocess.PIPE, stdout = subprocess.DEVNULL,
+							stderr = subprocess.DEVNULL)
+			process.communicate()
+			self.assertEqual(process.returncode, 0)		
+
 
 if __name__ == '__main__':
     unittest.main()

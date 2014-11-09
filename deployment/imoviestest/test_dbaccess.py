@@ -16,7 +16,7 @@ class TestDBConnector(unittest.TestCase):
 		"""
 		cls.cnx = mysql.connector.connect(user = 'root', password = 'imoviestest',
 										   autocommit = True)
-		cls.cursor = cls.cnx.cursor()
+		cls.cursor = cls.cnx.cursor(buffered = True)
 		cls.cursor.execute("GRANT ALL ON imovies_test.* TO 'ca'@'%'")
 	
 	@classmethod
@@ -40,7 +40,7 @@ class TestDBConnector(unittest.TestCase):
 		self.cursor.execute('INSERT INTO users SELECT * FROM imovies.users')
 		self.cursor.execute('INSERT INTO user_certs SELECT * FROM imovies.user_certs')
 		
-		self.db = dbaccess.DBConnector('imoviesca_test.cnf')
+		self.db = dbaccess.DBConnector('imoviesca.cnf')
 		self.db.connect()
 		
 	def tearDown(self):
@@ -49,17 +49,18 @@ class TestDBConnector(unittest.TestCase):
 	
 	def test_getEmployeeAtr(self):
 		""" Test the getEmployeeAtr method. """
-		data = (b'fu', b'Fuerst', b'Andreas', b'fu@imovies.ch')
+		data = ('fu', 'Fuerst', 'Andreas', 'fu@imovies.ch')
 		self.assertEqual(data, self.db.getEmployeeAtr('fu'));
 		
-		data = (b'db', b'Basin', b'David', b'db@imovies.ch')
+		data = ('db', 'Basin', 'David', 'db@imovies.ch')
 		self.assertEqual(data, self.db.getEmployeeAtr('db'));
 		
 	def test_ensureAuthCall(self):
 		""" Test the ensureAuthCall method. """
-		self.assertTrue(self.db.ensureAuthCall('fu', '6e58f76f5be5ef06a56d4eeb2c4dc58be3dbe8c7'));
-		self.assertTrue(self.db.ensureAuthCall('db', '8d0547d4b27b689c3a3299635d859f7d50a2b805'));
-		self.assertFalse(self.db.ensureAuthCall('ac', '7a347d4b27b689c3a3299635d859f7d50a2b805'));
+		self.assertTrue(self.db.ensureAuthCall('fu', '6e58f76f5be5ef06a56d4eeb2c4dc58be3dbe8c7'))
+		self.assertTrue(self.db.ensureAuthCall('db', '8d0547d4b27b689c3a3299635d859f7d50a2b805'))
+		self.assertFalse(self.db.ensureAuthCall('ac', '7a347d4b27b689c3a3299635d859f7d50a2b805'))
+	
 	
 	def test_updateExpiredCerts(self):
 		""" Test the the updateExpiredCerts method. """
@@ -96,6 +97,7 @@ class TestDBConnector(unittest.TestCase):
 		self.assertFalse(self.db.hasIssued('ms'))
 		self.assertFalse(self.db.hasIssued('a3'))
 		
+		
 	def test_storeCert(self):
 		""" Test the storeCert function """
 		cert = ('-----BEGIN CERTIFICATE-----\n'
@@ -129,10 +131,12 @@ class TestDBConnector(unittest.TestCase):
 		certif = Certificate(cert)
 		
 		self.db.storeCert('fu', certif, 'testKey')
+		self.assertTrue(self.db.hasIssued('fu'))
+		
+		self.cursor.execute("SELECT certificate FROM user_certs WHERE "
+			"serial = %s", (certif.serial, ))
+		self.assertEqual(self.cursor.fetchone()[0], cert)
 		
 	
-	
-	
-		
 if __name__ == '__main__':
     unittest.main()

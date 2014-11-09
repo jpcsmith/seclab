@@ -29,23 +29,6 @@ class ConfigError(CAError):
 		return ('<error type="ConfigError">'
 					'<msg>' + self.msg + '</msg>'
 				'</error>')
-
-class UnexpectedLogicError(CAError):
-	""" Exception raised when assumptions of the system do not
-	hold true.
-	
-	Attributes:
-	  msg (string): explanation of the error
-	
-	"""
-	def __inti__(self, msg):
-		self.msg = msg
-		
-	def __str__(self):
-		""" Provide the xml representation of the class """
-		return ('<error type="UnexpectedLogicError">'
-					'<msg>' + self.msg + '</msg>'
-				'</error>')
 	
 class CertificateParsingError(CAError):
 	""" Exception raised if parsing a certificate fails.
