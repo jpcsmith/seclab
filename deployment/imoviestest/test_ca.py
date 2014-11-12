@@ -1,17 +1,25 @@
 import unittest
-from imovies.ca import CertificateAuthority
-from imovies.ca import Certificate
-import logging
+import base64
 import subprocess
 import imovies.errors
 import mysql.connector
+from imovies.ca import CertificateAuthority, Certificate
+import re as reEngine
+import os, shutil
 from tempfile import NamedTemporaryFile
-import base64
-
 
 class TestCertificateAuthority(unittest.TestCase):
 	""" Unit tests for the CertificateAuthority class of module
-	imovies.ca """
+	imovies.ca 
+	
+	Attributes:
+	  cnx (connection.MySQLConnection): Connection to the database
+	    used for root queries.
+	  cursor (cursor.MySQLCursorBuffered): Buffered cursor to the database
+	    based on the connection above.
+	  ca (imovies.ca.CertificateAuthority): CertificateAuthority being tested
+	
+	"""
 	
 	@classmethod
 	def setUpClass(cls):
@@ -40,13 +48,9 @@ class TestCertificateAuthority(unittest.TestCase):
 		starting database
 		
 		"""
-		self.cursor.execute('DROP DATABASE IF EXISTS imovies_test')
-		self.cursor.execute('CREATE DATABASE imovies_test')
-		self.cursor.execute('USE imovies_test')
-		self.cursor.execute('CREATE TABLE users LIKE imovies.users')
-		self.cursor.execute('CREATE TABLE user_certs LIKE imovies.user_certs')
-		self.cursor.execute('INSERT INTO users SELECT * FROM imovies.users')
-		self.cursor.execute('INSERT INTO user_certs SELECT * FROM imovies.user_certs')
+		# self.cursor.callproc('imovies.clone_to_test')
+		subprocess.call('mysql -u root -pimoviestest < ref/mysql_setup.sql', shell = True)
+		self.cnx.database = 'imovies'
 		
 	def tearDown(self):
 		pass
@@ -195,11 +199,11 @@ class TestCertificateAuthority(unittest.TestCase):
 			'UFPGKnrvpVZSZgqFjBnPI28uce8YoJBvMHyuBDeHu9As\n'
 			'-----END CERTIFICATE-----')
 		pfx = self.ca._toPKCS12('example', Certificate(certEnc), key)
-		
+		dPFX = base64.standard_b64decode(pfx)
 		
 		# Check that the pfx byte array creates a pareable object
-		with open('temp.pfx', 'w+b') as temp:
-			temp.write(pfx)
+		with NamedTemporaryFile('w+b') as temp:
+			temp.write(dPFX)
 			temp.flush()
 			process = subprocess.Popen(['openssl', 'pkcs12', '-in', temp.name,
 							   '-passin', 'pass:', '-nodes'], 
@@ -207,6 +211,159 @@ class TestCertificateAuthority(unittest.TestCase):
 							stderr = subprocess.DEVNULL)
 			process.communicate()
 			self.assertEqual(process.returncode, 0)		
+
+	def test__encryptKey(self):
+		""" Test the inner _encryptKey function. """
+		key = ('-----BEGIN PRIVATE KEY-----\n'
+			'MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAPbQGHsT6aONxp6M\n'
+			'jjEAZXoMuS22ZiJkVwPsuf2nK/aPy9bOHKU1TSNz/iBMJE/9OvAT5Lm0ZhPIRcSl\n'
+			'ctZ+a9Y8d3HUgHs7rM1FWk+YWMsnTRUWr/Sq2PM+E4lWZH4tp0kStVzwNocjhQX7\n'
+			'eh37bUTvw+9RsbfQrrZ/izO3ocefAgMBAAECgYEAqjdOCuPqyB9pEcOB9Q1+7rOD\n'
+			'qqEWwzVMRaqnguYeDceSHyy62L1v27mNU5zvljLgyN4Panudwprmcv5fusopd5Y1\n'
+			'F+tLyp55gP4U8l3bSq6YyLo5384Me5DCVOt3+BfTmxsZhpz752JedU5+MMJAbQAy\n'
+			'Yr7AHrB849+KQIeq8VECQQD9tbjOsYSl+NxDFKHUhfd8Qmv8c2ndeeCclU0Kp+1/\n'
+			'sO2mhI2ILG1T1DFuVtxNwz/IM19H5o0jJV7F4XLBlh6rAkEA+QpvoHWEsTTYU+EE\n'
+			'JbAAb8+W1gzc3Lr9ZS8LM6MUbLFGKtvf/NQ2NXkfD6Ns0AmnoKnukD1vTI94E0zj\n'
+			'DwPq3QJBALdQq0SlXVvy8WuCp9+AIK7m61GQLsj5PALHmc/+QAuIUl6D3iOrPh9Y\n'
+			'7ZJ1Ll79mcNU4x53hjkD0nOWDy2zA1sCQHCPU/atRwUlAmWe/VXfX8Mpi15BwA2Q\n'
+			'AnmaMrDrE48w7KrwaCOI8ttmXDCgR80boAUQ6T+OVODAs5/dj3644Y0CQCtpjYh9\n'
+			'CpiEqs9gmTUZ0gnm3VthSPqKosB+eZRtUFjeGdWvgK57xxdKB6fk8RbilPayDpPD\n'
+			'2wrJNhDYZKbcMX8=\n'
+			'-----END PRIVATE KEY-----')
+		
+		encIV, encSymKey, salt, encPrivKey = self.ca._encryptKey(key)
+		archiveKey = ('/home/jsmith/Dropbox/Course Files/Semester III/Security Lab'
+			'/working/CA/private/archive-key.pem')
+		# Decrypt the initialization vector using the archive cert
+		process = subprocess.Popen(['openssl', 'rsautl', '-decrypt',
+							  '-inkey', archiveKey],
+							stdin = subprocess.PIPE, stdout = subprocess.PIPE, 
+							stderr = subprocess.PIPE)
+		stdout, stderr = process.communicate(base64.standard_b64decode(encIV))
+		iv = str(stdout, 'UTF-8')
+		
+		# Decrypt the symmetric key using the archive key
+		process = subprocess.Popen(['openssl', 'rsautl', '-decrypt',
+							  '-inkey', archiveKey],
+							stdin = subprocess.PIPE, stdout = subprocess.PIPE, 
+							stderr = subprocess.PIPE)
+		stdout, stderr = process.communicate(base64.standard_b64decode(encSymKey))
+		symKey = str(stdout, 'UTF-8')
+		
+		
+		# Decrypt the private key using the symmetric key
+		process = subprocess.Popen(['openssl', 'enc', '-d', '-aes-256-cbc', 
+							  '-S', salt, '-iv', iv,
+							  '-K', symKey, '-base64'],
+							stdin = subprocess.PIPE, stdout = subprocess.PIPE,
+							stderr = subprocess.PIPE, universal_newlines = True)
+		stdout, stderr = process.communicate(encPrivKey)
+		self.assertEqual(stdout, key)
+	
+	def test__verifyCertificate(self):
+		""" Test the inner _verifyCertificate function. """
+		certEnc = ('-----BEGIN CERTIFICATE-----\n'
+			'MIIEzTCCArWgAwIBAgIBaDANBgkqhkiG9w0BAQsFADBPMRAwDgYDVQQKDAdpTW92\n'
+			'aWVzMRswGQYDVQQLDBJQS0kgSW5mcmFzdHJ1Y3R1cmUxHjAcBgNVBAMMFUNlcnRp\n'
+			'ZmljYXRlIEF1dGhvcml0eTAeFw0xNDExMDkxMzU4NDlaFw0xNTExMDkxMzU4NDla\n'
+			'MIGIMRAwDgYDVQQKDAdpTW92aWVzMRYwFAYDVQQLDA1FbXBsb3llZSBCYXNlMQ4w\n'
+			'DAYDVQQEDAVTbWl0aDEUMBIGA1UEKgwLSmVhbi1QaWVycmUxDzANBgNVBAMMBmpz\n'
+			'bWl0aDElMCMGCSqGSIb3DQEJARYWanNtaXRoQHN0dWRlbnQuZXRoei5jaDCBnzAN\n'
+			'BgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA9tAYexPpo43GnoyOMQBlegy5LbZmImRX\n'
+			'A+y5/acr9o/L1s4cpTVNI3P+IEwkT/068BPkubRmE8hFxKVy1n5r1jx3cdSAezus\n'
+			'zUVaT5hYyydNFRav9KrY8z4TiVZkfi2nSRK1XPA2hyOFBft6HfttRO/D71Gxt9Cu\n'
+			'tn+LM7ehx58CAwEAAaOB/TCB+jAdBgNVHQ4EFgQU3HTF2iGQ/iT9o/4DCdr3WjP9\n'
+			'KcUwfwYDVR0jBHgwdoAUbBHJiwepZDeZCw7f8pI8glaic3KhU6RRME8xEDAOBgNV\n'
+			'BAoMB2lNb3ZpZXMxGzAZBgNVBAsMElBLSSBJbmZyYXN0cnVjdHVyZTEeMBwGA1UE\n'
+			'AwwVQ2VydGlmaWNhdGUgQXV0aG9yaXR5ggkAwelbEUtYjiIwCQYDVR0TBAIwADAL\n'
+			'BgNVHQ8EBAMCA8gwHQYDVR0lBBYwFAYIKwYBBQUHAwIGCCsGAQUFBwMEMCEGA1Ud\n'
+			'EQQaMBiBFmpzbWl0aEBzdHVkZW50LmV0aHouY2gwDQYJKoZIhvcNAQELBQADggIB\n'
+			'AD/JNoUFn/vjKy9x6UpjPnkBlXslGF5UJQBNjIJ+blApJs1cRpoX0sV7YcSf9iNz\n'
+			'n3oX/BdHZ78Hi+zgtgFZanYbbwpZhjT6+2fL2RyCamYeQmY7N5NHpv7Pf0ax695X\n'
+			'D3hhD0jtyAH6cIw54IRXAGBH+CeiYk38W+U/xJGGFh9wR+YYbYkPrbueJhrB1Fii\n'
+			'SSpvvMl8MwxdtP1X995GZlJVSoJ+xlnbMJgkDJKA2O7bAV4HMN5AHn+SBO9/Ow3n\n'
+			'9i7WALJbFrlbaGAyMrnKIfS6kXIbPWl/2qz1PBmUAWhGN+56Pg+evIZT9+y+xzow\n'
+			'7LMJs3VPjoEH8rapKsq7F03EuZbY+4meDnWQrCitNXUOfXaapxhncjtJDTxJWSth\n'
+			'NidSRJir3k8Lx7QY9zm6MVG0td3k2f5w9asgTMb7g57PqL49GqBPl4pv3LAuj8QD\n'
+			'b+s+TjfGejgkrmh6qIhoBnkKPUYatxax4I0bYHNaM1zUEeocXk+8uB8FsBE5SRgp\n'
+			'dsa/PJqsPxgcgzBOMf+RS1YzwXfctaPZgnezORRUUG8n6GtdRtUyQLx8ZxRfcAIj\n'
+			'lI1WuvRAxww+Lj0Ms64gZisHKPBa0piDNT5O3zsYI2rAliNKE+fTM6RjahpzhvQ7\n'
+			'UFPGKnrvpVZSZgqFjBnPI28uce8YoJBvMHyuBDeHu9As\n'
+			'-----END CERTIFICATE-----')
+		
+		cert1 = Certificate(certEnc)
+		# This fails because the above certificate wasnt issued by the current CA cert
+		self.assertRaises(imovies.errors.CertVerificationError,
+					lambda: self.ca._verifyCertificate(cert1))
+		
+		privateKey, csr = self.ca._req('jsmith', 'Smith', 'Jean-Pierre', 'jsmith@student.ethz.ch')
+		cert2 = self.ca._sign(csr)
+		self.assertTrue(self.ca._verifyCertificate(cert2))
+		
+		# TODO Test by revoking a certificate and then attempting to verify
+		
+		
+	def test__getNextSerial(self):
+		""" Test the _getNextSerial helper method """
+		emptySerial = 'imoviestest/support/serials/empty_serial'
+		invalidSerial = 'imoviestest/support/serials/invalid_serial'
+		validSerial = 'imoviestest/support/serials/valid_serial'
+		doesNotExistSerial = 'imoviestest/support/serials/does_not_exist'
+		zeroSerial = 'imoviestest/support/serials/zero_serial'
+		
+		pattern = pattern = '^([0-9a-fA-F]+)$'
+		# Test the valid ones
+		self.assertTrue(reEngine.search(pattern, 
+								  self.ca._getNextSerial(validSerial),
+								  flags = reEngine.IGNORECASE))
+		self.assertTrue(reEngine.search(pattern, 
+								  self.ca._getNextSerial(self.ca.serialFile),
+								  flags = reEngine.IGNORECASE))
+		# Test the exceptions
+		self.assertRaises(imovies.errors.InvalidSerialFileError,
+					lambda: self.ca._getNextSerial(invalidSerial))
+		self.assertRaises(imovies.errors.InvalidSerialFileError,
+					lambda: self.ca._getNextSerial(emptySerial))
+		self.assertRaises(imovies.errors.InvalidSerialFileError,
+					lambda: self.ca._getNextSerial(zeroSerial))
+		self.assertRaises(OSError, lambda: self.ca._getNextSerial(doesNotExistSerial))
+		
+	@unittest.skip('Cant test this without a certificate valid for the '
+		'current CA whose uid we can assign to being admin ')
+	def test_getStatistics(self):
+		""" Test the getStatistics method. """
+		testCertFile = '../TLS/web-cert.pem'
+		process = subprocess.Popen(['openssl', 'x509', '-in', testCertFile],
+							 stdin = subprocess.PIPE, stderr = subprocess.PIPE,
+							 stdout = subprocess.PIPE, universal_newlines = True)
+		encoding, stderr = process.communicate()
+		self.cursor.execute("INSERT INTO user_certs(uid, serial, exp_date, subject, "
+			"expired, revoked) VALUES"
+			"('fu', 'A01', UTC_TIMESTAMP(), 'testsub', FALSE, FALSE),"
+			"('db', 'A02', UTC_TIMESTAMP(), 'testsub', FALSE, TRUE),"
+			"('ms', 'A03', UTC_TIMESTAMP(), 'testsub', TRUE, TRUE),"
+			"('a3', 'A04', UTC_TIMESTAMP(), 'testsub', TRUE, TRUE)")
+		
+		nIssued, nRevoked, serial = self.ca.getStatistics(encoding)
+		self.assertEqual(nIssued, 4)
+		self.assertEqual(nRevoked, 3)
+
+
+	def test_generateCRL(self): # TODO Not dne
+		""" Test the generateCRL function """
+		indexFile = '../CA/index.txt'
+		referenceFile =  'imoviestest/support/refIndexFile.txt'
+		tempFile = '../CA/tempindex.txt'
+		
+		if os.path.exists(indexFile):
+			shutil.copy(indexFile, tempFile)
+			shutil.copy(referenceFile, indexFile)
+			self.ca.generateCRL()
+			shutil.copy(tempFile, indexFile)
+		else:
+			shutil.copy(referenceFile, indexFile)
+			self.ca.generateCRL()		
+			os.remove(indexFile)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,14 @@
+Todo:	- Check that important events were logged
+	- Configure logging
+	- Write tests for generateCRL, revokeCert, and storeCRL
+
+Caveats:	- Verification procedure may fail if the certificate expired between the start of the user's TLS session and the verify call at the CA resulting in a failed call.
+	- The infrastructure certificates are not in the database and do not count towards the statistics issued.
+	- Serial numbers may be skipped as the CA may issue a certificate and consume the serial key but then discard it due to a further error.
+	- Since the DB does not use transactions, we may have archived private keys for certificates that were never issued.
+
+Security:	- We could use xml schema to define the response from the CA, that way we may be able to protect ourselves from malform xml documents.
+	- DB Queries are not generalised, they make assumptions on existence of uid or serial number, since they are not called otherwise.
+	- Concurrency is not supported
+	- Should probably pass the cipherlist to the  mysqld command to prevent someone overwriting it via system variables
+	- We use parameterized queries, not prepared statements, same benefit to preventing XSS

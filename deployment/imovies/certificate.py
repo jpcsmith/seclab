@@ -1,4 +1,7 @@
+""" Module containing the Certificate class which encompasses an x509v3 
+certificate.
 
+"""
 
 from .errors import CertificateParsingError
 import subprocess

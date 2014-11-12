@@ -1,8 +1,7 @@
 """ Provides several custom exception classes used by the modules in
 the imoviesca package.
-"""
 
-from mysql.connector.errors import Error as MySQLError
+"""
 
 class CAError(Exception):
 	""" Base exception for exceptions caused by problems with the
@@ -10,69 +9,64 @@ class CAError(Exception):
 	
 	Exceptions subclassing this are caused by problems such as I/O
 	or invalid configuration, input or logic.
+	
 	"""
 	pass
+
+class InvalidCallError(CAError):
+	""" Raised when the format of the script call is invalid. """
+	pass
+
 
 class ConfigError(CAError):
 	""" Exception thrown when there is an error processing the 
 	configuration file.
 	
-	Attributes:
-	  msg (string): explanation of the error
 	"""
+	pass
 	
-	def __init__(self, msg):
-		self.msg = msg
-		
-	def __str__(self):
-		""" Provide the xml representation of the class """
-		return ('<error type="ConfigError">'
-					'<msg>' + self.msg + '</msg>'
-				'</error>')
 	
 class CertificateParsingError(CAError):
-	""" Exception raised if parsing a certificate fails.
+	""" Exception raised if parsing a certificate fails."""
+	pass
 	
-	Attributes:
-	  msg (string): explanation of the errors
-	  
-	"""
-	def __inti__(self, msg):
-		self.msg = msg
-		
-	def __str__(self):
-		""" Provide the xml representation of the class """
-		return ('<error type="CertificateParsingError">'
-					'<msg>' + self.msg + '</msg>'
-				'</error>')
 	
 class IssuingError(CAError):
 	""" Exception raised when there is an issue with an certificate
 	signing request.
 	
-	Attributes:
-	  msg (string): an explanation of the error
-	  
 	"""
-	def __init__(self, msg):
-		self.msg = msg
-		
-	def __str__(self):
-		""" Provide the xml representation of the class """
-		return ('<error type="IssuingError">'
-					'<msg>' + self.msg + '</msg>'
-				'</error>')
+	pass
 
-def str(err):
-	""" Returns an xml string representation of a mysql.connector.errors.Error
-	exception.
+class TooManyIssuedError(CAError):
+	""" Thrown when the user tries to issue a certificate when
+	they already have one issued. 
 	
-	Args:
-	  err (mysql.connector.errors.Error): The exception to return the xml 
-	    representation of.
-	    
 	"""
-	return ('<error type="MySQLError">'
-				'<msg>' + err.msg + '</msg>'
-			'</error>')
-			
+	pass
+
+class CertVerificationError(CAError):
+	""" Raised when either the procedure to verify a certificate fails.
+	
+	This should not be raised when the certificate is revoked or expired.
+	
+	"""
+	pass
+
+
+class InvalidCertError(CAError):
+	""" Raised when a certificate proves to be either expired or revoked. """
+	pass
+
+class InvalidSerialFileError(CAError):
+	""" Raised when the serial cannot be read from the serial file. """
+	pass
+
+class RevocationError(CAError):
+	""" Raised when revocation of a certificate cannot be done. """
+	pass
+
+class CRLGenerationError(CAError):
+	""" Raised when the CRL generation fails """
+	pass
+	

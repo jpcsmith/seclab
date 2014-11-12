@@ -7,21 +7,28 @@ default_ca = imovies_ca
 
 [ imovies_ca ]
 base_dir		= /home/jsmith/Dropbox/Course Files/Semester III/Security Lab/working/CA
-certificate		= ${base_dir}/ca_cert.pem
-private_key		= ${base_dir}/private/ca_key.pem
-database		= ${base_dir}/index.txt
+certificate		= ${base_dir}/ca-cert.pem
+private_key		= ${base_dir}/private/ca-key.pem
+archive_cert	= ${base_dir}/archive-cert.pem
 serial			= ${base_dir}/serial
-
-new_certs_dir	= ${base_dir}/CA/newcerts
+database		= ${base_dir}/index.txt
 
 default_days	= 365
 default_md		= sha256
-unique_subject	= no
 preserve		= no
 copy_extensions = none
 x509_extensions	= emp_cert # For employees
-policy			= emp_policy # For employees
+rand			= /home/jsmith/.rnd
 
+default_crl_days= 30
+crl				= ${base_dir}/crl/crl.pem
+crlnumber		= ${base_dir}/crl/crlnumber.txt
+crl_extensions	= crl_ext
+
+[ crl_ext ]
+# CRL extensions.
+# Only issuerAltName and authorityKeyIdentifier make any sense in a CRL.
+authorityKeyIdentifier=keyid:always
 
 # ----- Section for requests
 [ req ]
@@ -72,17 +79,6 @@ keyUsage				= digitalSignature,nonRepudiation,keyAgreement #keyEncipherment?
 extendedKeyUsage		= clientAuth,emailProtection
 subjectAltName			= email:copy
 
-
-# ----- The policy to be matched for employee certificates
-[ emp_policy ]
-O				= match
-OU				= supplied
-surname			= supplied
-givenName		= supplied
-emailAddress	= supplied
-commonName		= supplied
-
-
 # ----- ISSUED extensions for the various machines
 [ backend_cert ]
 subjectKeyIdentifier	= hash
@@ -95,31 +91,30 @@ authorityKeyIdentifier	= keyid:always,issuer:always
 basicConstraints		= CA:FALSE
 keyUsage				= digitalSignature,nonRepudiation,keyAgreement 
 extendedKeyUsage		= serverAuth
-
-# ----- The policy to be matched for machine certificates
-[ srv_policy ]
-O				= match
-OU				= supplied
-commonName		= supplied
+[ archive_cert ]
+subjectKeyIdentifier	= hash
+authorityKeyIdentifier	= keyid:always,issuer:always
+basicConstraints		= CA:FALSE
+keyUsage				= keyEncipherment
 
 # ----- Settings for the connection to the database
 [ mysql ]
-default_db = mysql_local_test
+default_db = mysql_local
 
 [ mysql_local ]
 host			= 127.0.0.1
 port 			= 3306
 user			= ca
 database		= imovies
-ca_certificate	= ../CA/ca_cert.pem
-certificate		= ../CA/ca_nr_cert.pem
-private_key		= ../CA/private/ca_nr_key.pem
+ca_certificate	= ../CA/ca-cert.pem
+certificate		= ../CA/ca-tls-cert.pem
+private_key		= ../CA/private/ca-tls-key.pem
 
 [ mysql_local_test ]
 host			= 127.0.0.1
 port 			= 3306
 user			= ca
-database		= imovies_test
-ca_certificate	= ../CA/ca_cert.pem
-certificate		= ../CA/ca_nr_cert.pem
-private_key		= ../CA/private/ca_nr_key.pem
+database		= test_imovies
+ca_certificate	= ../CA/ca-cert.pem
+certificate		= ../CA/ca-tls-cert.pem
+private_key		= ../CA/private/ca-tls-key.pem

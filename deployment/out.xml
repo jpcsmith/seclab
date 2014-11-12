@@ -1,0 +1,1 @@
+<result><arguments><uid>fu</uid><sha1>6e58f76f5be5ef06a56d4eeb2c4dc58be3dbe8c7</sha1></arguments><error type="IssuingError">2003: Can't connect to MySQL server on '127.0.0.1:3306' (111 Connection refused)</error></result>

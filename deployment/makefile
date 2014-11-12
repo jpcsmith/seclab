@@ -1,89 +1,90 @@
+RANDFILE                = ~/.rnd
+ERROR_LOG		= /dev/null
+
 # Directories
-CA_DIR		= ../CA
-NCERTS_DIR	= $(CA_DIR)/newcerts
-KEY_DIR		= $(CA_DIR)/private
-PKI_DIR		= ../PKI
+TLS_DIR	= ../TLS
+CA_DIR	= ../CA
+CRL_DIR = ../CA/crl
+KEY_DIR	= $(CA_DIR)/private
 
-# Files
-SERIAL 		= $(CA_DIR)/serial
-ISSUED		= $(CA_DIR)/index.txt
-CNF		= $(CA_DIR)/imoviesca.cnf
-TEMP_CSR	= temp.csr
+# CA Variables
+CA_KEY	= $(KEY_DIR)/ca-key.pem
+CA_CERT	= $(CA_DIR)/ca-cert.pem
+CONFIG	= $(CA_DIR)/imoviesca.cnf
+SERIAL	= $(CA_DIR)/serial
+INDEX	= $(CA_DIR)/index.txt
+CRL	= $(CRL_DIR)/crl.pem
+CRLNUM	= $(CRL_DIR)/crlnumber.txt
 
-# Server cert & private key
-CA_CERT		= $(CA_DIR)/ca_cert.pem
-CA_KEY		= $(KEY_DIR)/ca_key.pem
+# TLS certificates and keys
+WEB_CERT	= $(TLS_DIR)/web-cert.pem
+WEB_KEY		= $(TLS_DIR)/web-key.pem
+DB_CERT		= $(TLS_DIR)/db-cert.pem
+DB_KEY		= $(TLS_DIR)/db-key.pem
+BACKUP_CERT	= $(TLS_DIR)/backup-cert.pem
+BACKUP_KEY	= $(TLS_DIR)/backup-key.pem
+CA_TLS_CERT	= $(CA_DIR)/ca-tls-cert.pem
+CA_TLS_KEY	= $(KEY_DIR)/ca-tls-key.pem
+ARCHIVE_CERT	= $(CA_DIR)/archive-cert.pem
+ARCHIVE_KEY	= $(KEY_DIR)/archive-key.pem
 
-# Other certs & private keys
-WEB_CERT	= $(PKI_DIR)/web_cert.pem
-WEB_KEY		= $(PKI_DIR)/web_key.pem
-DB_CERT		= $(PKI_DIR)/db_cert.pem
-DB_KEY		= $(PKI_DIR)/db_key.pem
-BACKUP_CERT	= $(PKI_DIR)/backup_cert.pem
-BACKUP_KEY	= $(PKI_DIR)/backup_key.pem
-CA_NR_CERT	= $(CA_DIR)/ca_nr_cert.pem
-CA_NR_KEY	= $(KEY_DIR)/ca_nr_key.pem
-
-CERTS		:= $(CA_CERT) $(WEB_CERT) $(DB_CERT) $(BACKUP_CERT) $(CA_NR_CERT)
+# Multitarget variables
+TLS_KEYS = $(WEB_KEY) $(DB_KEY) $(BACKUP_KEY) $(CA_TLS_KEY) $(ARCHIVE_KEY)
+CERTIFICATES = $(WEB_CERT) $(DB_CERT) $(BACKUP_CERT) $(CA_TLS_CERT) $(ARCHIVE_CERT)
 
 # Deployment files
-DEP_CNF		= imoviesca.cnf
-DEP_PKG		= imovies
+DEP_CNF = imoviesca.cnf
 
 .PHONY: clean all
-.SILENT:
 
-all: $(CERTS)
+all: $(CERTIFICATES) $(CRL)
 
-# Directory setup
+# Make Directories
+$(TLS_DIR):
+	mkdir $(TLS_DIR)
 $(CA_DIR):
 	mkdir $(CA_DIR)
-$(PKI_DIR):
-	mkdir $(PKI_DIR)
-$(NCERTS_DIR):
-	mkdir -p $(NCERTS_DIR)
 $(KEY_DIR):
 	mkdir -p $(KEY_DIR)
-	
+$(CRL_DIR):
+	mkdir -p $(CRL_DIR)
+
 # File setup
+$(CONFIG): $(DEP_CNF) | $(CA_DIR)
+	cp $(DEP_CNF) $(CONFIG)
 $(SERIAL): | $(CA_DIR)
 	echo "01" > $(SERIAL)
-$(ISSUED): | $(CA_DIR)
-	touch $(ISSUED)
-$(CNF): | $(CA_DIR) $(DepCNF)
-	cp $(DEP_CNF) $(CNF)
-
-# PKI setup
-$(WEB_KEY): | $(PKI_DIR)
-	openssl genrsa -out $(WEB_KEY) 2048
-$(DB_KEY): | $(PKI_DIR)
-	openssl genrsa -out $(DB_KEY) 2048
-$(BACKUP_KEY): | $(PKI_DIR)
-	openssl genrsa -out $(BACKUP_KEY) 2048
-$(CA_NR_KEY): | $(PKI_DIR)
-	openssl genrsa -out $(CA_NR_KEY) 2048
+$(INDEX): | $(CA_DIR)
+	touch $(INDEX)
+	echo "unique_subject = no" > $(INDEX).attr
+$(CRLNUM): | $(CRL_DIR)
+	echo "01" > $(CRLNUM)
 	
-$(WEB_CERT): $(WEB_KEY) $(CA_CERT) $(CA_KEY) | $(PKI_DIR) $(SERIAL) $(ISSUED) $(NCERTS_DIR)
-	openssl req -new -config $(CNF) -key $(WEB_KEY) -out $(TEMP_CSR) -subj /O="iMovies"/OU="TLS Infrastructure"/commonName="Web Server"
-	openssl ca -in $(TEMP_CSR) -extensions websrv_cert -policy srv_policy -config $(CNF) -out $(WEB_CERT) -batch
-	rm $(TEMP_CSR)
-$(DB_CERT): $(DB_KEY) $(CA_CERT) $(CA_KEY) | $(PKI_DIR) $(SERIAL) $(ISSUED) $(NCERTS_DIR)
-	openssl req -new -config $(CNF) -key $(DB_KEY) -out $(TEMP_CSR) -subj /O="iMovies"/OU="TLS Infrastructure"/commonName="Database Server"
-	openssl ca -in $(TEMP_CSR) -extensions backend_cert -policy srv_policy -config $(CNF) -out $(DB_CERT) -batch
-	rm $(TEMP_CSR)
-$(BACKUP_CERT): $(BACKUP_KEY) $(CA_CERT) $(CA_KEY) | $(PKI_DIR) $(SERIAL) $(ISSUED) $(NCERTS_DIR)
-	openssl req -new -config $(CNF) -key $(BACKUP_KEY) -out $(TEMP_CSR) -subj /O="iMovies"/OU="TLS Infrastructure"/commonName="Backup Server"
-	openssl ca -in $(TEMP_CSR) -extensions backend_cert -policy srv_policy -config $(CNF) -out $(BACKUP_CERT) -batch
-	rm $(TEMP_CSR)
-$(CA_NR_CERT): $(CA_NR_KEY) $(CA_CERT) $(CA_KEY) | $(PKI_DIR) $(SERIAL) $(ISSUED) $(NCERTS_DIR)
-	openssl req -new -config $(CNF) -key $(CA_NR_KEY) -out $(TEMP_CSR) -subj /O="iMovies"/OU="TLS Infrastructure"/commonName="Certificate Authority Server"
-	openssl ca -in $(TEMP_CSR) -extensions backend_cert -policy srv_policy -config $(CNF) -out $(CA_NR_CERT) -batch
-	rm $(TEMP_CSR)
+# Make CA certificate and private key
+$(CA_KEY): | $(KEY_DIR) $(RANDFILE) $(ERROR_LOG)
+	openssl genrsa -rand $(RANDFILE) -out $(CA_KEY) 4096 2> $(ERROR_LOG)
+$(CA_CERT): $(CA_KEY) | $(CA_DIR) $(CONFIG) $(RANDFILE)
+	openssl req -new -x509 -days 3650 -key $(CA_KEY) -out $(CA_CERT) -subj /O="iMovies"/OU="PKI Infrastructure"/commonName="iMovies Certificate Authority" -config $(CONFIG) -rand $(RANDFILE)
 
-$(CA_KEY): | $(KEY_DIR)
-	openssl genrsa -out $(CA_KEY) 4096	# May need to set the rand here
-$(CA_CERT): $(CA_KEY) | $(CA_DIR) $(CNF)
-	openssl req -new -x509 -days 3650 -key $(CA_KEY) -out $(CA_CERT) -subj /O="iMovies"/OU="PKI Infrastructure"/commonName="Certificate Authority" -config $(CNF)
+# Make the CRL files
+$(CRL): $(CA_KEY) $(CA_CERT) | $(CRL_DIR) $(INDEX) $(CONFIG) $(CRLNUM)
+	openssl ca -gencrl -config $(CONFIG) -out $(CRL)
+	
+# Make the TLS certificates and private keys
+$(TLS_KEYS): | $(TLS_DIR) $(CA_DIR) $(KEY_DIR) $(RANDFILE) $(ERROR_LOG)
+	openssl genrsa -rand $(RANDFILE) -out $@ 2048 2> $(ERROR_LOG)
+$(WEB_CERT): $(WEB_KEY) $(CA_CERT) $(CA_KEY) | $(TLS_DIR) $(SERIAL) $(RANDFILE) $(CONFIG) $(ERROR_LOG)
+	openssl req -new -key $(WEB_KEY) -config $(CONFIG) -subj /O="iMovies"/OU="TLS Infrastructure"/commonName="Web Server" -rand $(RANDFILE) | openssl x509 -req -inform PEM -outform PEM -CA $(CA_CERT) -CAkey $(CA_KEY) -CAserial $(SERIAL) -extfile $(CONFIG) -extensions websrv_cert -days 365 -sha256 -clrext -out $(WEB_CERT) 2> $(ERROR_LOG)
+$(DB_CERT): $(DB_KEY) $(CA_CERT) $(CA_KEY) | $(TLS_DIR) $(SERIAL) $(RANDFILE) $(CONFIG) $(ERROR_LOG)
+	openssl req -new -key $(DB_KEY) -config $(CONFIG) -subj /O="iMovies"/OU="TLS Infrastructure"/commonName="Database Server" -rand $(RANDFILE) | openssl x509 -req -inform PEM -outform PEM -CA $(CA_CERT) -CAkey $(CA_KEY) -CAserial $(SERIAL) -extfile $(CONFIG) -extensions backend_cert -days 365 -sha256 -clrext -out $(DB_CERT) 2> $(ERROR_LOG)
+$(BACKUP_CERT): $(BACKUP_KEY) $(CA_CERT) $(CA_KEY) | $(TLS_DIR) $(SERIAL) $(RANDFILE) $(CONFIG) $(ERROR_LOG)
+	openssl req -new -key $(BACKUP_KEY) -config $(CONFIG) -subj /O="iMovies"/OU="TLS Infrastructure"/commonName="Backup Server" -rand $(RANDFILE) | openssl x509 -req -inform PEM -outform PEM -CA $(CA_CERT) -CAkey $(CA_KEY) -CAserial $(SERIAL) -extfile $(CONFIG) -extensions backend_cert -days 365 -sha256 -clrext -out $(BACKUP_CERT) 2> $(ERROR_LOG)
+$(CA_TLS_CERT): $(CA_TLS_KEY) $(CA_CERT) $(CA_KEY) | $(TLS_DIR) $(SERIAL) $(RANDFILE) $(CONFIG) $(ERROR_LOG)
+	openssl req -new -key $(CA_TLS_KEY) -config $(CONFIG) -subj /O="iMovies"/OU="TLS Infrastructure"/commonName="Certificate Authority Server" -rand $(RANDFILE) | openssl x509 -req -inform PEM -outform PEM -CA $(CA_CERT) -CAkey $(CA_KEY) -CAserial $(SERIAL) -extfile $(CONFIG) -extensions backend_cert -days 365 -sha256 -clrext -out $(CA_TLS_CERT) 2> $(ERROR_LOG)
+$(ARCHIVE_CERT): $(ARCHIVE_KEY) $(CA_CERT) $(CA_KEY) | $(TLS_DIR) $(SERIAL) $(RANDFILE) $(CONFIG) $(ERROR_LOG)
+	openssl req -new -key $(ARCHIVE_KEY) -config $(CONFIG) -subj /O="iMovies"/OU="Certificate Archive"/commonName="Archive Encryption Key" -rand $(RANDFILE) | openssl x509 -req -inform PEM -outform PEM -CA $(CA_CERT) -CAkey $(CA_KEY) -CAserial $(SERIAL) -extfile $(CONFIG) -extensions archive_cert -days 3650 -sha256 -clrext -out $(ARCHIVE_CERT) 2> $(ERROR_LOG)	
 
 clean:
-	rm -rf $(CA_DIR) $(PKI_DIR)
+	rm -rf $(CA_DIR) $(TLS_DIR)
+
+	

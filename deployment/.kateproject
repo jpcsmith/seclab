@@ -1,4 +1,5 @@
 {
 	"name": "iMovies CA",
-	"files": [ { "directory": "/home/jsmith/Dropbox/Course Files/Semester III/Security Lab/working/deployment", "recursive": 1 } ]
+	"files": [ { "directory": "/home/jsmith/Dropbox/Course Files/Semester III/Security Lab/working/deployment", 
+	"recursive": 1 } ]
 }
